@@ -121,8 +121,9 @@ def lua_type(obj):
         unlock_runtime(lua_object._runtime)
 
 
+
 @cython.no_gc_clear
-cdef class LuaRuntime:
+cdef public class LuaRuntime[type LuaRuntimeType, object LuaRuntimeObject]:
     """The main entry point to the Lua runtime.
 
     Available options:

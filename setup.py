@@ -250,12 +250,16 @@ lua_sources = [
 
 
 config = None
-if not has_option('--use-bundle'):
-    config = find_lua_build(no_luajit=has_option('--no-luajit'))
-if not config and not has_option('--no-bundle'):
-    config = use_bundled_lua(lua_bundle_path, lua_sources, c_defines)
-if not config:
-    config = no_lua_error()
+if 'LUA_INCLUDE' in os.environ and 'LUA_LIB' in os.environ:
+    config = dict(include_dirs=os.environ['LUA_INCLUDE'].split(','),
+        extra_objects=os.environ['LUA_LIB'].split(','))
+else:
+    if not has_option('--use-bundle'):
+        config = find_lua_build(no_luajit=has_option('--no-luajit'))
+    if not config and not has_option('--no-bundle'):
+        config = use_bundled_lua(lua_bundle_path, lua_sources, c_defines)
+    if not config:
+        config = no_lua_error()
 
 ext_args = {
     'extra_objects': config.get('extra_objects'),
