@@ -781,6 +781,9 @@ cdef class _LuaTable(_LuaObject):
             lua.lua_settop(L, old_top)
             unlock_runtime(self._runtime)
 
+    def __dir__(self):
+        return list(self.keys())
+
 
 cdef _LuaTable new_lua_table(LuaRuntime runtime, lua_State* L, int n):
     cdef _LuaTable obj = _LuaTable.__new__(_LuaTable)

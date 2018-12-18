@@ -249,8 +249,9 @@ lua_sources = [
 ]
 
 
-config = None
-if 'LUA_INCLUDE' in os.environ and 'LUA_LIB' in os.environ:
+if 'LUA_INCLUDE' in os.environ or 'LUA_LIB' in os.environ:
+    if 'LUA_INCLUDE' not in os.environ or 'LUA_LIB' not in os.environ:
+        sys.exit("cannot define just one of LUA_INCLUDE and LUA_LIB")
     config = dict(include_dirs=os.environ['LUA_INCLUDE'].split(','),
         extra_objects=os.environ['LUA_LIB'].split(','))
 else:
