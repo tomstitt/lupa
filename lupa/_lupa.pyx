@@ -511,6 +511,20 @@ cdef inline void unlock_runtime(LuaRuntime runtime) nogil:
 
 
 ################################################################################
+
+cdef int getmethodstable(lua_State * L, int n):
+  top = lua.lua_gettop(L)
+  if lua.luaL_getmetafield(L, n, "__methods"):
+      if lua.lua_type(L, -1) == lua.LUA_TFUNCTION:
+          lua.lua_pushvalue(L, n if n > 0 else n-1)
+          lua.lua_call(L, 1, 1)
+      if lua.lua_type(L, -1) == lua.LUA_TTABLE:
+          return 1
+  lua.lua_settop(L, top)
+  return 0
+
+
+################################################################################
 # Lua object wrappers
 
 @cython.internal
@@ -655,10 +669,62 @@ cdef class _LuaObject:
             # table[nil] fails, so map None -> python.none for Lua tables
             py_to_lua(self._runtime, L, name, wrap_none=lua_type == lua.LUA_TTABLE)
             lua.lua_gettable(L, -2)
+
+            if lua.lua_type(L, -1) == lua.LUA_TFUNCTION:
+                top = lua.lua_gettop(L)
+                is_member = False
+                if lua.luaL_getmetafield(L, -2, "__index"):
+                    if lua.lua_type(L, -1) == lua.LUA_TTABLE:
+                        lua.lua_pushnil(L)
+                        while lua.lua_next(L, -2):
+                            if lua.lua_equal(L, -1, -4):
+                                is_member = True
+                                break
+                            lua.lua_pop(L, 1)
+                    lua.lua_pop(L, 1)
+
+                if not is_member and getmethodstable(L, -2):
+                    lua.lua_pushnil(L)
+                    while lua.lua_next(L, -2):
+                        if lua.lua_equal(L, -1, -4):
+                            is_member = True
+                            break
+                        lua.lua_pop(L, 1)
+
+                lua.lua_settop(L, top)
+                if is_member:
+                    f = new_lua_function(self._runtime, L, -1)
+                    return (lambda self=self: lambda *args, **kwargs: f(self, *args, **kwargs))()
             return py_from_lua(self._runtime, L, -1)
         finally:
             lua.lua_settop(L, old_top)
             unlock_runtime(self._runtime)
+
+    def __dir__(self):
+        print("dir on obj")
+        cdef lua_State* L = self._state
+        lock_runtime(self._runtime)
+        self.push_lua_object()
+
+        attrs = []
+        if lua.luaL_getmetafield(L, -1, "__index"):
+            if lua.lua_type(L, -1) == lua.LUA_TTABLE:
+                print("index is table")
+                lua.lua_pushnil(L)
+                while lua.lua_next(L, -2):
+                    lua.lua_pop(L, 1)
+                    attrs.append(py_from_lua(self._runtime, L, -1))
+            lua.lua_pop(L, 1)
+
+        if getmethodstable(L, -1):
+            lua.lua_pushnil(L)
+            while lua.lua_next(L, -2):
+                lua.lua_pop(L, 1)
+                attrs.append(py_from_lua(self._runtime, L, -1))
+
+        lua.lua_pop(L, 1)
+        unlock_runtime(self._runtime)
+        return attrs
 
 
 cdef _LuaObject new_lua_object(LuaRuntime runtime, lua_State* L, int n):
@@ -782,7 +848,9 @@ cdef class _LuaTable(_LuaObject):
             unlock_runtime(self._runtime)
 
     def __dir__(self):
-        return list(self.keys())
+        meta_attrs = _LuaObject.__dir__(self)
+        attrs = list(self.keys())
+        return attrs + meta_attrs
 
 
 cdef _LuaTable new_lua_table(LuaRuntime runtime, lua_State* L, int n):
@@ -972,7 +1040,20 @@ cdef class _LuaIter:
         self._state = NULL
         assert obj._runtime is not None
         self._runtime = obj._runtime
-        self._obj = obj
+        cdef lua_State* L = obj._state
+        lock_runtime(self._runtime)
+        lua.lua_rawgeti(L, lua.LUA_REGISTRYINDEX, obj._ref)
+        if lua.luaL_getmetafield(L, -1, "__pairs"):
+            lua.lua_call(L, 0, 3)
+            # TODO: verify pairs is returned, if not store the function
+            self._obj = new_lua_table(self._runtime, L, -2)
+            self._refiter = lua.luaL_ref(L, lua.LUA_REGISTRYINDEX)
+            lua.lua_pop(L, 2)
+        else:
+            self._obj = obj
+        lua.lua_pop(L, 1)
+        unlock_runtime(self._runtime)
+
         self._state = obj._state
         self._refiter = 0
         self._what = what
