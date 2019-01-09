@@ -121,7 +121,6 @@ def lua_type(obj):
         unlock_runtime(lua_object._runtime)
 
 
-
 @cython.no_gc_clear
 cdef public class LuaRuntime[type LuaRuntimeType, object LuaRuntimeObject]:
     """The main entry point to the Lua runtime.
@@ -199,15 +198,20 @@ cdef public class LuaRuntime[type LuaRuntimeType, object LuaRuntimeObject]:
     cdef object _attribute_getter
     cdef object _attribute_setter
     cdef bint _unpack_returned_tuples
+    cdef bint _owns_lua_state
 
     def __cinit__(self, encoding='UTF-8', source_encoding=None,
                   attribute_filter=None, attribute_handlers=None,
                   bint register_eval=True, bint unpack_returned_tuples=False,
-                  bint register_builtins=True):
-        cdef lua_State* L = lua.luaL_newstate()
-        if L is NULL:
-            raise LuaError("Failed to initialise Lua runtime")
+                  bint register_builtins=True, bint owns_lua_state=True):
+        self._owns_lua_state = owns_lua_state
+        cdef lua_State* L = NULL
+        if owns_lua_state:
+            L = lua.luaL_newstate()
+            if L is NULL:
+                raise LuaError("Failed to initialise Lua runtime")
         self._state = L
+
         self._lock = FastRLock()
         self._pyrefs_in_lua = {}
         self._encoding = _asciiOrNone(encoding)
@@ -233,13 +237,14 @@ cdef public class LuaRuntime[type LuaRuntimeType, object LuaRuntimeObject]:
                 raise ValueError("attribute_filter and attribute_handlers are mutually exclusive")
             self._attribute_getter, self._attribute_setter = getter, setter
 
-        lua.luaL_openlibs(L)
-        self.init_python_lib(register_eval, register_builtins)
-        lua.lua_settop(L, 0)
-        lua.lua_atpanic(L, <lua.lua_CFunction>1)
+        if owns_lua_state:
+            lua.luaL_openlibs(L)
+            self.init_python_lib(register_eval, register_builtins)
+            lua.lua_settop(L, 0)
+            lua.lua_atpanic(L, <lua.lua_CFunction>1)
 
     def __dealloc__(self):
-        if self._state is not NULL:
+        if self._owns_lua_state and self._state is not NULL:
             lua.lua_close(self._state)
             self._state = NULL
 
@@ -424,6 +429,12 @@ cdef public class LuaRuntime[type LuaRuntimeType, object LuaRuntimeObject]:
 
         return 0  # nothing left to return on the stack
 
+
+cdef public LuaRuntime luaruntime_from_state(lua_State * L):
+    cdef LuaRuntime lr = LuaRuntime(owns_lua_state=False)
+    lr._state = L
+    lr.init_python_lib(True, True)
+    return lr
 
 ################################################################################
 # decorators for calling Python functions with keyword (named) arguments
@@ -701,7 +712,6 @@ cdef class _LuaObject:
             unlock_runtime(self._runtime)
 
     def __dir__(self):
-        print("dir on obj")
         cdef lua_State* L = self._state
         lock_runtime(self._runtime)
         self.push_lua_object()
@@ -709,7 +719,6 @@ cdef class _LuaObject:
         attrs = []
         if lua.luaL_getmetafield(L, -1, "__index"):
             if lua.lua_type(L, -1) == lua.LUA_TTABLE:
-                print("index is table")
                 lua.lua_pushnil(L)
                 while lua.lua_next(L, -2):
                     lua.lua_pop(L, 1)
