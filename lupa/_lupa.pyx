@@ -1903,14 +1903,14 @@ cdef const char *luaL_findtable(lua_State *L, int idx,
         lua.lua_pushvalue(L, idx)
 
     while True:
-        end = strchr(fname, '.')
+        end = strchr(fname, b'.')
         if end == NULL:
             end = fname + strlen(fname)
         lua.lua_pushlstring(L, fname, end - fname)
         lua.lua_rawget(L, -2)
         if lua.lua_type(L, -1) == lua.LUA_TNIL:
             lua.lua_pop(L, 1)
-            lua.lua_createtable(L, 0, (1 if end[0] == '.' else size_hint))
+            lua.lua_createtable(L, 0, (1 if end[0] == b'.' else size_hint))
             lua.lua_pushlstring(L, fname, end - fname)
             lua.lua_pushvalue(L, -2)
             lua.lua_settable(L, -4)
@@ -1919,7 +1919,7 @@ cdef const char *luaL_findtable(lua_State *L, int idx,
             return fname
         lua.lua_remove(L, -2)
         fname = end + 1
-        if end[0] != '.':
+        if end[0] != b'.':
             break
     return NULL
 
